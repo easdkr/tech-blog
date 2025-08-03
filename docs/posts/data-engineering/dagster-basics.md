@@ -649,6 +649,9 @@ graph LR
     B2[테스트] --> B
     B3[문서화] --> B
     B4[버전 관리] --> B
+    
+    D[Mixpanel<br/>BigQuery Export] --> E[BigQuery<br/>Raw Data]
+    E --> B
 ```
 
 #### DBT 실행 방식
@@ -858,17 +861,6 @@ def dbt_pipeline():
     dbt_tests(dbt_models(raw_data()))
 ```
 
-### 설치 및 시작
-
-```bash
-pip install dagster dagit
-```
-
-#### 첫 번째 파이프라인 실행
-```bash
-dagit -f my_pipeline.py
-```
-
 ### 장점
 
 1. **유연성**: 다양한 데이터 소스와 도구와 통합 가능
@@ -1021,9 +1013,9 @@ def transformer_dbt_assets(
 ```
 
 #### DBT 모델 구조
-- **dim/**: 차원 테이블 (고객, 상품, SKU 등)
-- **fct/**: 팩트 테이블 (주문, 배송, 클레임 등)
-- **mart/**: 마트 테이블 (비즈니스 메트릭)
+- **dim/**: 차원 테이블 (고객, 상품, SKU, 사용자 이벤트 등)
+- **fct/**: 팩트 테이블 (주문, 배송, 클레임, 사용자 행동 등)
+- **mart/**: 마트 테이블 (비즈니스 메트릭, 사용자 분석, 상품 성과, 사용자 여정, 전환 퍼널 등)
 
 ### 4. Jobs (작업)
 
@@ -1053,6 +1045,22 @@ create_product_notification_event = define_asset_job(
     ),
 )
 ```
+
+#### Mixpanel 분석 마트 생성
+```python
+mixpanel_analytics_mart = define_asset_job(
+    name="mixpanel_analytics_mart",
+    selection=AssetSelection.assets(
+        ["dim", "dim_user_events"],
+        ["fct", "fct_user_behavior"],
+        ["mart", "mart_user_analytics"],
+        ["mart", "mart_product_performance"],
+        ["mart", "mart_user_journey"],
+        ["mart", "mart_conversion_funnel"],
+    ),
+)
+```
+
 
 ### 5. Schedules (스케줄)
 
@@ -1091,12 +1099,14 @@ graph TD
     A --> D[src_product]
     E[PostgreSQL] --> F[src_point_transaction]
     E --> G[src_quotation]
+    H[Mixpanel<br/>BigQuery Export] --> I[BigQuery Raw Data]
     
-    B --> H[BigQuery]
-    C --> H
-    D --> H
-    F --> H
-    G --> H
+    B --> J[BigQuery]
+    C --> J
+    D --> J
+    F --> J
+    G --> J
+    I --> J
 ```
 
 ### 2. 데이터 변환 단계
@@ -1104,12 +1114,67 @@ graph TD
 ```mermaid
 graph TD
     A[BigQuery Raw Data] --> B[DBT Models]
-    B --> C[dim_customer]
-    B --> D[dim_product]
-    B --> E[dim_sku]
-    B --> F[fct_order]
-    B --> G[fct_order_item]
-    B --> H[mart_complete_purchase_order]
+    
+    subgraph "Source Layer"
+        B --> S1[src_customer]
+        B --> S2[src_order]
+        B --> S3[src_product]
+        B --> S4[src_user_events]
+        B --> S5[src_user_properties]
+    end
+    
+    subgraph "Dimension Layer"
+        S1 --> D1[dim_customer]
+        S2 --> D2[dim_order]
+        S3 --> D3[dim_product]
+        S3 --> D4[dim_sku]
+        S4 --> D5[dim_user_events]
+        S5 --> D6[dim_user_properties]
+    end
+    
+    subgraph "Fact Layer"
+        S2 --> F1[fct_order]
+        S2 --> F2[fct_order_item]
+        S4 --> F3[fct_user_behavior]
+        S4 --> F4[fct_user_events]
+    end
+    
+    subgraph "Mart Layer"
+        D1 --> M1[mart_customer_analytics]
+        D3 --> M2[mart_product_performance]
+        F3 --> M3[mart_user_analytics]
+        F4 --> M4[mart_user_journey]
+        F4 --> M5[mart_conversion_funnel]
+        F1 --> M6[mart_complete_purchase_order]
+    end
+    
+    style A fill:#e8f5e8,stroke:#333,stroke-width:2px,color:#000
+    style B fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
+    
+    style S1 fill:#2196f3,stroke:#333,stroke-width:2px,color:#fff
+    style S2 fill:#2196f3,stroke:#333,stroke-width:2px,color:#fff
+    style S3 fill:#2196f3,stroke:#333,stroke-width:2px,color:#fff
+    style S4 fill:#ff9800,stroke:#333,stroke-width:2px,color:#fff
+    style S5 fill:#ff9800,stroke:#333,stroke-width:2px,color:#fff
+    
+    style D1 fill:#4caf50,stroke:#333,stroke-width:2px,color:#fff
+    style D2 fill:#4caf50,stroke:#333,stroke-width:2px,color:#fff
+    style D3 fill:#4caf50,stroke:#333,stroke-width:2px,color:#fff
+    style D4 fill:#4caf50,stroke:#333,stroke-width:2px,color:#fff
+    style D5 fill:#ff9800,stroke:#333,stroke-width:2px,color:#fff
+    style D6 fill:#ff9800,stroke:#333,stroke-width:2px,color:#fff
+    
+    style F1 fill:#ff9800,stroke:#333,stroke-width:2px,color:#fff
+    style F2 fill:#ff9800,stroke:#333,stroke-width:2px,color:#fff
+    style F3 fill:#f44336,stroke:#333,stroke-width:2px,color:#fff
+    style F4 fill:#f44336,stroke:#333,stroke-width:2px,color:#fff
+    
+    style M1 fill:#9c27b0,stroke:#333,stroke-width:2px,color:#fff
+    style M2 fill:#9c27b0,stroke:#333,stroke-width:2px,color:#fff
+    style M3 fill:#9c27b0,stroke:#333,stroke-width:2px,color:#fff
+    style M4 fill:#9c27b0,stroke:#333,stroke-width:2px,color:#fff
+    style M5 fill:#9c27b0,stroke:#333,stroke-width:2px,color:#fff
+    style M6 fill:#9c27b0,stroke:#333,stroke-width:2px,color:#fff
 ```
 
 ### 3. 전체 파이프라인
@@ -1130,10 +1195,58 @@ graph LR
     I[Schedule] --> F
     J[Sensors] --> F
     
-    style A fill:#e1f5fe
-    style E fill:#c8e6c9
-    style F fill:#fff3e0
-    style D fill:#f3e5f5
+    subgraph "데이터 소스"
+        A1[BigCommerce API]
+        A2[PostgreSQL]
+        A3[Mixpanel BigQuery Export]
+    end
+    
+    subgraph "Extract Assets"
+        B1[src_customer]
+        B2[src_order]
+        B3[src_product]
+    end
+    
+    subgraph "DBT Transform"
+        D1[dim_customer]
+        D2[dim_product]
+        D3[fct_order]
+        D4[dim_user_events]
+        D5[fct_user_behavior]
+        D6[mart_user_analytics]
+        D7[mart_product_performance]
+        D8[mart_user_journey]
+        D9[mart_conversion_funnel]
+    end
+    
+    style A fill:#e3f2fd,stroke:#333,stroke-width:2px,color:#000
+    style B fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
+    style C fill:#e8f5e8,stroke:#333,stroke-width:2px,color:#000
+    style D fill:#fff3e0,stroke:#333,stroke-width:2px,color:#000
+    style E fill:#fce4ec,stroke:#333,stroke-width:2px,color:#000
+    style F fill:#f1f8e9,stroke:#333,stroke-width:2px,color:#000
+    style G fill:#e0f2f1,stroke:#333,stroke-width:2px,color:#000
+    style H fill:#fff8e1,stroke:#333,stroke-width:2px,color:#000
+    style I fill:#f3e5f5,stroke:#333,stroke-width:2px,color:#000
+    style J fill:#e8eaf6,stroke:#333,stroke-width:2px,color:#000
+    
+    style A1 fill:#2196f3,stroke:#333,stroke-width:2px,color:#fff
+    style A2 fill:#2196f3,stroke:#333,stroke-width:2px,color:#fff
+    style A3 fill:#ff9800,stroke:#333,stroke-width:2px,color:#fff
+    
+    style B1 fill:#4caf50,stroke:#333,stroke-width:2px,color:#fff
+    style B2 fill:#4caf50,stroke:#333,stroke-width:2px,color:#fff
+    style B3 fill:#4caf50,stroke:#333,stroke-width:2px,color:#fff
+    
+    style D1 fill:#4caf50,stroke:#333,stroke-width:2px,color:#fff
+    style D2 fill:#4caf50,stroke:#333,stroke-width:2px,color:#fff
+    style D3 fill:#ff9800,stroke:#333,stroke-width:2px,color:#fff
+    style D4 fill:#ff9800,stroke:#333,stroke-width:2px,color:#fff
+    style D5 fill:#f44336,stroke:#333,stroke-width:2px,color:#fff
+    style D6 fill:#f44336,stroke:#333,stroke-width:2px,color:#fff
+    style D7 fill:#9c27b0,stroke:#333,stroke-width:2px,color:#fff
+    style D8 fill:#9c27b0,stroke:#333,stroke-width:2px,color:#fff
+    style D9 fill:#9c27b0,stroke:#333,stroke-width:2px,color:#fff
 ```
 
 ---
@@ -1165,99 +1278,6 @@ class CustomerConfig(Config):
     full_refresh: bool = False  # 전체 새로고침 여부
 ```
 
-### 3. 데이터 품질 검사
-```python
-@asset_check(asset=products)
-def required_columns_has_no_missing_values(context, products):
-    """필수 컬럼에 결측값이 없는지 검사"""
-    required_columns = ["id", "name", "price"]
-    for col in required_columns:
-        if products[col].isnull().any():
-            raise CheckError(f"필수 컬럼 {col}에 결측값이 있습니다.")
-```
-
-### 4. 에러 처리 및 알림
-```python
-@asset
-def src_customer(context, bigcommerce, bigquery):
-    try:
-        # 데이터 수집 로직
-        pass
-    except Exception as e:
-        context.log.error(f"고객 데이터 수집 실패: {str(e)}")
-        # Slack 알림 전송
-        context.resources.slack.send_message(
-            channel="#data-alerts",
-            text=f"고객 데이터 수집 실패: {str(e)}"
-        )
-        raise
-```
-
----
-
-## ⚙️ 환경 설정
-
-### 1. 환경 변수
-
-```bash
-# BigCommerce 설정
-BIGCOMMERCE_ACCESS_TOKEN=your_access_token
-BIGCOMMERCE_STORE_HASH=your_store_hash
-
-# PostgreSQL 설정
-WISE_POSTGRES_URL=postgresql://user:pass@host:port/db
-COMMERCE_POSTGRES_URL=postgresql://user:pass@host:port/db
-
-# BigQuery 설정
-GCP_SERVICE_ACCOUNT_KEY=path/to/service-account.json
-LEGACY_GCP_SERVICE_ACCOUNT_KEY=path/to/legacy-service-account.json
-
-# Slack 설정
-SLACK_BOT_TOKEN=xoxb-your-slack-token
-```
-
-### 2. 의존성 설치
-
-```bash
-pip install -r requirements.txt
-```
-
-### 3. DBT 설정
-
-```bash
-cd transformer
-dbt deps
-dbt debug
-```
-
----
-
-## 🚀 실행 방법
-
-### 1. 개발 환경 실행
-
-```bash
-# Dagster UI 실행
-dagit -f orchestrator/definitions.py
-
-# 특정 Asset 실행
-dagster asset materialize -f orchestrator/definitions.py -s src_customer
-
-# 특정 Job 실행
-dagster job execute -f orchestrator/definitions.py -j sync_customer
-```
-
-### 2. 프로덕션 배포
-
-```bash
-# Docker 이미지 빌드
-docker build -t data-governance .
-
-# Docker 컨테이너 실행
-docker run -p 3000:3000 data-governance
-```
-
----
 
 ## 📊 모니터링 및 알림
 
@@ -1275,17 +1295,6 @@ context.resources.slack.send_message(
 )
 ```
 
-### 3. 데이터 품질 모니터링
-```python
-@asset_check(asset=src_customer)
-def customer_data_quality_check(context, src_customer):
-    """고객 데이터 품질 검사"""
-    # 데이터 검증 로직
-    pass
-```
-
----
-
 ## 👨‍💻 개발 가이드
 
 ### 1. 새로운 Asset 추가
@@ -1301,7 +1310,170 @@ def new_asset(
     pass
 ```
 
-### 2. 새로운 Resource 추가
+### 2. 새로운 DBT 모델 추가
+DBT로 데이터를 변환하는 경우, `transformer/models/` 디렉토리에 SQL 파일만 추가하면 됩니다. Dagster는 자동으로 DBT 모델을 감지하여 Asset으로 등록합니다.
+
+
+#### Dimension 모델 추가
+```sql
+-- transformer/models/dim/dim_new_entity.sql
+{{ config(materialized='table', schema='dim') }}
+
+SELECT 
+    id as entity_id,
+    name as entity_name,
+    created_at,
+    updated_at
+FROM {{ ref('src_new_table') }}
+```
+
+#### Fact 모델 추가
+```sql
+-- transformer/models/fct/fct_new_fact.sql
+{{ config(materialized='table', schema='fct') }}
+
+SELECT 
+    entity_id,
+    event_type,
+    event_date,
+    amount,
+    quantity
+FROM {{ ref('src_new_table') }}
+```
+
+#### Mart 모델 추가
+```sql
+-- transformer/models/mart/mart_new_analytics.sql
+{{ config(materialized='table', schema='mart') }}
+
+SELECT 
+    d.entity_name,
+    f.event_type,
+    f.event_date,
+    SUM(f.amount) as total_amount,
+    COUNT(*) as event_count
+FROM {{ ref('dim_new_entity') }} d
+JOIN {{ ref('fct_new_fact') }} f ON d.entity_id = f.entity_id
+GROUP BY d.entity_name, f.event_type, f.event_date
+```
+
+#### DBT 모델 테스트 추가
+```yaml
+# transformer/models/schema.yml
+version: 2
+
+models:
+  - name: dim_new_entity
+    description: "새로운 엔티티 차원 테이블"
+    config:
+      materialized: table
+      schema: dim
+    columns:
+      - name: entity_id
+        description: "엔티티 고유 ID"
+        tests:
+          - not_null
+          - unique
+      - name: entity_name
+        description: "엔티티 이름"
+        tests:
+          - not_null
+      - name: created_at
+        description: "생성 시간"
+        tests:
+          - not_null
+      - name: updated_at
+        description: "수정 시간"
+
+  - name: fct_new_fact
+    description: "새로운 팩트 테이블"
+    config:
+      materialized: table
+      schema: fct
+    columns:
+      - name: fact_id
+        description: "팩트 고유 ID"
+        tests:
+          - not_null
+          - unique
+      - name: entity_id
+        description: "엔티티 ID"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_new_entity')
+              field: entity_id
+      - name: event_type
+        description: "이벤트 타입"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['purchase', 'view', 'click']
+      - name: event_date
+        description: "이벤트 날짜"
+        tests:
+          - not_null
+      - name: amount
+        description: "금액"
+        tests:
+          - not_null
+          - dbt_utils.is_numeric
+
+  - name: mart_new_analytics
+    description: "새로운 분석 마트 테이블"
+    config:
+      materialized: table
+      schema: mart
+    columns:
+      - name: entity_name
+        description: "엔티티 이름"
+        tests:
+          - not_null
+      - name: event_type
+        description: "이벤트 타입"
+        tests:
+          - not_null
+      - name: event_date
+        description: "이벤트 날짜"
+        tests:
+          - not_null
+      - name: total_amount
+        description: "총 금액"
+        tests:
+          - not_null
+          - dbt_utils.is_numeric
+      - name: event_count
+        description: "이벤트 개수"
+        tests:
+          - not_null
+          - dbt_utils.is_numeric
+
+# 소스 테이블 정의
+sources:
+  - name: raw_data
+    description: "원시 데이터 소스"
+    tables:
+      - name: new_table
+        description: "새로운 원시 테이블"
+        columns:
+          - name: id
+            description: "고유 ID"
+            tests:
+              - not_null
+              - unique
+          - name: name
+            description: "이름"
+            tests:
+              - not_null
+          - name: created_at
+            description: "생성 시간"
+            tests:
+              - not_null
+          - name: updated_at
+            description: "수정 시간"
+```
+
+### 3. 새로운 Resource 추가
 ```python
 class NewResource(ConfigurableResource):
     api_key: str
@@ -1311,7 +1483,7 @@ class NewResource(ConfigurableResource):
         pass
 ```
 
-### 3. 새로운 Job 추가
+### 4. 새로운 Job 추가
 ```python
 new_job = define_asset_job(
     name="new_job",
@@ -1321,111 +1493,6 @@ new_job = define_asset_job(
     ),
 )
 ```
-
----
-
-## 🔧 트러블슈팅
-
-### 1. 일반적인 문제들
-
-#### BigCommerce API 제한
-```python
-# 배치 크기 조정
-async def stream_all_customers(self, batch_size: int = 100):
-    # 더 작은 배치 크기 사용
-```
-
-#### BigQuery 연결 오류
-```python
-# 인증 파일 경로 확인
-"bigquery": BigQueryResource(
-    project="data-warehouse-455801",
-    gcp_credentials=EnvVar("GCP_SERVICE_ACCOUNT_KEY"),
-),
-```
-
-#### DBT 모델 실행 실패
-```bash
-# DBT 디버그
-cd transformer
-dbt debug
-
-# 특정 모델만 실행
-dbt run --select model_name
-```
-
-### 2. 로그 확인
-```bash
-# Dagster 로그 확인
-dagster instance logs
-
-# 특정 실행 로그 확인
-dagster run logs <run_id>
-```
-
----
-
-## ⚡ 성능 최적화
-
-### 1. 병렬 처리
-```python
-# 비동기 처리로 API 호출 최적화
-async def stream_all_customers(self, concurrent_requests: int = 8):
-    semaphore = asyncio.Semaphore(concurrent_requests)
-    # 병렬 처리 로직
-```
-
-### 2. 증분 처리
-```python
-# 증분 데이터 처리로 성능 향상
-class CustomerConfig(Config):
-    hours_lookback: Optional[int] = 12  # 최근 12시간만 처리
-```
-
-### 3. 배치 처리
-```python
-# 대용량 데이터 배치 처리
-def process_in_batches(df, batch_size=1000):
-    for i in range(0, len(df), batch_size):
-        batch = df[i:i+batch_size]
-        # 배치 처리 로직
-```
-
----
-
-## 🔒 보안 고려사항
-
-### 1. 환경 변수 관리
-- ✅ 민감한 정보는 환경 변수로 관리
-- ✅ 프로덕션에서는 시크릿 매니저 사용
-
-### 2. 데이터 접근 제어
-```python
-# PostgreSQL 리소스에서 INSERT/DELETE 차단
-def execute_query_df(self, query: str) -> pd.DataFrame:
-    query_upper = query.upper()
-    if "INSERT" in query_upper or "DELETE" in query_upper:
-        raise ValueError("보안상의 이유로 INSERT와 DELETE 쿼리는 실행할 수 없습니다.")
-```
-
-### 3. API 키 관리
-- ✅ BigCommerce API 키는 환경 변수로 관리
-- ✅ 정기적인 키 로테이션
-
----
-
-## 📚 결론
-
-이 데이터 거버넌스 프로젝트는 Dagster를 사용하여 다양한 데이터 소스를 통합하고, DBT를 통해 데이터를 변환하여 일관된 데이터 웨어하우스를 구축합니다.
-
-### 주요 특징
-- **확장 가능한 아키텍처**: 새로운 데이터 소스와 변환 로직을 쉽게 추가
-- **실시간 모니터링**: Dagster UI를 통한 실시간 파이프라인 모니터링
-- **데이터 품질 보장**: Asset 체크를 통한 데이터 품질 검증
-- **자동화된 스케줄링**: 정기적인 데이터 파이프라인 실행
-- **에러 처리 및 알림**: 실패 시 즉시 알림으로 빠른 대응
-
----
 
 ## 📖 참고 자료
 
@@ -1438,6 +1505,6 @@ def execute_query_df(self, query: str) -> pd.DataFrame:
 
 <div align="center">
 
-**Made with ❤️ for Wisely Data Team**
+**Made with ❤️ for Wisely**
 
 </div> 
