@@ -1,0 +1,1 @@
+import{_ as a,c as e,o as r,a1 as d}from"./chunks/framework.C88IP-8t.js";const p=JSON.parse('{"title":"데이터 아키텍처 가이드","description":"","frontmatter":{},"headers":[],"relativePath":"index.md","filePath":"index.md"}'),i={name:"index.md"};function l(s,t,o,h,n,c){return r(),e("div",null,t[0]||(t[0]=[d("",39)]))}const g=a(i,[["render",l]]);export{p as __pageData,g as default};
