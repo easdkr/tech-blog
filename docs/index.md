@@ -59,6 +59,35 @@
 | **처리** | 간단한 ETL | 복잡한 ETL | Spark, Flink |
 | **쿼리** | SQL | SQL | Hive, Presto |
 
+## 데이터 엔지니어링 도구
+
+### 1. [Dagster 기초](./posts/data-engineering/dagster-basics.md)
+데이터 파이프라인 오케스트레이션을 위한 강력한 도구에 대한 가이드입니다.
+
+**주요 내용:**
+- Dagster의 개념과 특징
+- Assets, Ops, Jobs 등 핵심 개념
+- 설치 및 시작 방법
+- 모니터링과 개발자 경험
+
+### 2. [DBT 기초](./posts/data-engineering/dbt-basics.md)
+데이터 웨어하우스에서 SQL 기반 변환을 수행하는 도구에 대한 설명입니다.
+
+**주요 내용:**
+- DBT의 개념과 특징
+- Models, Sources, Tests 등 핵심 개념
+- 프로젝트 구조와 명령어
+- 데이터 품질 관리와 문서화
+
+### 3. [Dagster와 DBT 통합 아키텍처](./posts/data-engineering/data-mart-dagster-architecture.md)
+Dagster를 사용한 데이터 마트 구축 아키텍처에 대한 상세한 가이드입니다.
+
+**주요 내용:**
+- Dagster와 DBT의 통합 방법
+- 데이터 마트 구축 전략
+- 모니터링과 알림 설정
+- 실제 구현 사례
+
 ## 추가 리소스
 
 - [데이터 엔지니어링 모범 사례](./posts/data-engineering-best-practices.md) (준비 중)
