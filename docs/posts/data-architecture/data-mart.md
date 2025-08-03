@@ -2,7 +2,14 @@
 
 ## 개요
 
-Data Mart는 특정 비즈니스 영역이나 부서를 위한 데이터 저장소입니다. Data Warehouse의 하위 집합으로, 특정 사용자 그룹이나 부서의 요구사항에 맞춰 설계된 데이터베이스입니다.
+Data Mart는 특정 부서나 팀을 위한 맞춤형 데이터 저장소입니다. 쉽게 말해서, 각 부서가 필요로 하는 데이터만 따로 모아둔 작은 창고라고 생각하시면 됩니다.
+
+**예시**
+- 마케팅팀을 위한 마케팅 데이터 창고
+- 영업팀을 위한 영업 데이터 창고  
+- 재무팀을 위한 재무 데이터 창고
+
+각 부서는 자신에게 필요한 데이터만 빠르게 찾아서 사용할 수 있습니다.
 
 ## 특징
 
@@ -20,23 +27,6 @@ Data Mart는 특정 비즈니스 영역이나 부서를 위한 데이터 저장�
 - 정규화된 스키마
 - 직관적인 테이블 구조
 - 쉬운 이해와 사용
-
-## 유형
-
-### 1. Dependent Data Mart
-- Data Warehouse에서 직접 데이터를 추출
-- 중앙 집중식 데이터 관리
-- 일관성 보장
-
-### 2. Independent Data Mart
-- Data Warehouse와 독립적으로 운영
-- 자체 데이터 수집 및 처리
-- 빠른 구축 가능
-
-### 3. Hybrid Data Mart
-- Dependent와 Independent의 혼합
-- 유연한 데이터 소스 활용
-- 복잡한 요구사항 대응
 
 ## 사용 사례
 
@@ -322,12 +312,15 @@ GROUP BY date_key, sales_date;
 ## 기술 스택
 
 ### 데이터베이스
+- **BigQuery** (클라우드 데이터 웨어하우스)
 - PostgreSQL
 - MySQL
 - SQL Server
 - Oracle
 
-### ETL 도구
+### ETL/ELT 도구
+- **Dagster** (메인 오케스트레이션)
+- **DBT** (데이터 변환)
 - Apache Airflow
 - Talend
 - Informatica
@@ -338,8 +331,173 @@ GROUP BY date_key, sales_date;
 - Power BI
 - QlikView
 - Grafana
+- Looker (BigQuery 연동)
 
-## 모니터링 및 유지보수
+### 클라우드 플랫폼
+- **Google Cloud Platform** (BigQuery)
+- AWS (Redshift, Athena)
+- Azure (Synapse Analytics)
+
+## Data Mart 아키텍처
+
+### DBT + Dagster + BigQuery 조합
+
+```mermaid
+graph TB
+    subgraph "소스 시스템"
+        A[CRM]
+        B[ERP]
+        C[웹 로그]
+    end
+    
+    subgraph "데이터 수집"
+        D[Dagster Jobs]
+        E[DBT Models]
+    end
+    
+    subgraph "데이터 저장소"
+        F[BigQuery Raw Zone]
+        G[BigQuery Processed Zone]
+        H[BigQuery Mart Zone]
+    end
+    
+    subgraph "사용자"
+        I[비즈니스 사용자]
+        J[분석가]
+    end
+    
+    A --> D
+    B --> D
+    C --> D
+    
+    D --> F
+    F --> E
+    E --> G
+    G --> H
+    
+    H --> I
+    H --> J
+    
+    style D fill:#dc2626,stroke:#ef4444,color:#ffffff
+    style E fill:#0891b2,stroke:#06b6d4,color:#ffffff
+    style F fill:#1e3a8a,stroke:#3b82f6,color:#ffffff
+    style G fill:#7c3aed,stroke:#a855f7,color:#ffffff
+    style H fill:#059669,stroke:#10b981,color:#ffffff
+```
+
+### 구현 예시
+
+#### 1. Dagster 파이프라인 설정
+```python
+# dagster_pipeline.py
+from dagster import asset, AssetExecutionContext
+from google.cloud import bigquery
+
+@asset
+def extract_customer_data(context: AssetExecutionContext):
+    """고객 데이터 추출"""
+    # BigQuery에서 원본 데이터 추출
+    client = bigquery.Client()
+    query = """
+    SELECT * FROM `project.raw.customers`
+    WHERE DATE(created_at) = CURRENT_DATE()
+    """
+    return client.query(query).to_dataframe()
+
+@asset
+def transform_customer_mart(context: AssetExecutionContext, extract_customer_data):
+    """고객 마트 데이터 변환"""
+    # DBT 모델 실행
+    # dbt run --models customer_mart
+    pass
+```
+
+#### 2. DBT 모델 정의
+```sql
+-- models/marts/customer_mart.sql
+WITH customer_orders AS (
+    SELECT 
+        customer_id,
+        COUNT(*) as total_orders,
+        SUM(order_amount) as total_spent,
+        AVG(order_amount) as avg_order_value
+    FROM {{ ref('fct_orders') }}
+    GROUP BY customer_id
+)
+
+SELECT 
+    c.customer_id,
+    c.customer_name,
+    c.email,
+    c.customer_segment,
+    COALESCE(co.total_orders, 0) as total_orders,
+    COALESCE(co.total_spent, 0) as total_spent,
+    COALESCE(co.avg_order_value, 0) as avg_order_value,
+    CASE 
+        WHEN co.total_spent > 1000 THEN 'VIP'
+        WHEN co.total_spent > 500 THEN 'Premium'
+        ELSE 'Regular'
+    END as customer_tier
+FROM {{ ref('dim_customers') }} c
+LEFT JOIN customer_orders co ON c.customer_id = co.customer_id
+```
+
+#### 3. BigQuery 테이블 구조
+```sql
+-- Raw Zone
+CREATE TABLE `project.raw.customers` (
+    customer_id STRING,
+    customer_name STRING,
+    email STRING,
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP
+);
+
+-- Processed Zone
+CREATE TABLE `project.processed.dim_customers` (
+    customer_key INT64,
+    customer_id STRING,
+    customer_name STRING,
+    email STRING,
+    customer_segment STRING,
+    valid_from TIMESTAMP,
+    valid_to TIMESTAMP
+);
+
+-- Mart Zone
+CREATE TABLE `project.mart.customer_mart` (
+    customer_key INT64,
+    customer_id STRING,
+    customer_name STRING,
+    customer_tier STRING,
+    total_orders INT64,
+    total_spent NUMERIC,
+    avg_order_value NUMERIC,
+    last_order_date DATE
+);
+```
+
+### 장점
+
+#### 1. **DBT의 장점**
+- SQL 기반으로 쉬운 데이터 변환
+- 자동 문서화 및 데이터 카탈로그
+- 버전 관리 및 테스트 자동화
+- 재사용 가능한 모델과 매크로
+
+#### 2. **Dagster의 장점**
+- 시각적 파이프라인 모니터링
+- 개발자 친화적 인터페이스
+- 자동 재시도 및 오류 처리
+- 실시간 알림 및 대시보드
+
+#### 3. **BigQuery의 장점**
+- 서버리스 아키텍처로 관리 부담 최소화
+- 페타바이트 규모 데이터 처리
+- 내장 머신러닝 기능
+- 비용 효율적인 스토리지 및 컴퓨팅
+
+### 모니터링 및 유지보수
 
 ### 1. 성능 모니터링
 - 쿼리 성능 추적
