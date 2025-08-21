@@ -5,7 +5,7 @@ export default withMermaid({
   description: "A tech blog for Wisely.",
   base: "/tech-blog/",
   mermaid: {
-    theme: "default",
+    startOnLoad: false,
   },
 
   themeConfig: {
@@ -45,8 +45,22 @@ export default withMermaid({
         ],
       },
       {
-        text: "기타 문서",
-        items: [{ text: "My First Post", link: "/posts/first-post" }],
+        text: "결제",
+        items: [
+          {
+            text: "Payment",
+            link: "/posts/payment/payment",
+          },
+        ],
+      },
+      {
+        text: "주문",
+        items: [
+          {
+            text: "내재화 설계 초안",
+            link: "/posts/order/migration-design",
+          },
+        ],
       },
     ],
   },

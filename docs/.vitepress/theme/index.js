@@ -1,21 +1,24 @@
 import DefaultTheme from "vitepress/theme";
 import "./custom.css";
+import mermaid from "mermaid";
 
 export default {
   ...DefaultTheme,
-  enhanceApp({ app }) {
-    // Mermaid 지원을 위한 설정
+  enhanceApp({ app, router }) {
     if (typeof window !== "undefined") {
-      import("mermaid").then(({ default: mermaid }) => {
-        mermaid.initialize({
-          startOnLoad: true,
-          theme: "default",
-          flowchart: {
-            useMaxWidth: true,
-            htmlLabels: true,
-          },
-        });
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: "default",
+        flowchart: {
+          htmlLabels: true,
+        },
       });
+
+      router.onAfterRouteChanged = () => {
+        mermaid.run({
+          nodes: document.querySelectorAll(".mermaid"),
+        });
+      };
     }
   },
 };
