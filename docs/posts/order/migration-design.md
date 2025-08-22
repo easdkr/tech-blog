@@ -7,89 +7,123 @@
 **기본 전략:**
 
 - 프론트엔드 주문 로직을 내재화된 API로 변경
+- PG사 결제 프로세스 완전 분리 (결제 검증 필수)
 - SNS-SQS 팬아웃 패턴으로 높은 처리량 확보
 - 이벤트 기반 아키텍처로 빅커머스 동기화 및 후속 처리 분리
 - 점진적 마이그레이션으로 리스크 최소화
+
+**결제 보안 강화:**
+
+- 프론트엔드 결제 완료 후 백엔드에서 반드시 PG사 검증
+- 결제 금액/정보 불일치 시 자동 취소 처리
+- 위조 결제 데이터 감지 및 차단
+- 웹훅을 통한 이중 검증 체계
 
 ## 🏗️ 전체 시스템 아키텍처
 
 ```mermaid
 graph TB
-    subgraph "Frontend Layer"
-        A1[프론트엔드 주문 버튼]
+    subgraph FrontendLayer[Frontend Layer]
+        A1[사용자]
+        A2[프론트엔드<br/>주문/결제 화면]
+        A3[PG 결제<br/>컴포넌트]
     end
 
-    subgraph "API Gateway Layer"
-        B1[주문 생성 API]
-        B2[결제 완료 API]
-        B3[주문 조회 API]
+    subgraph APIGateway[API Gateway Layer]
+        B1[POST /orders<br/>주문 생성]
+        B2[POST /orders/:id/complete<br/>결제 완료]
+        B3[POST /orders/:id/fail<br/>결제 실패]
+        B4[GET /orders/:id<br/>주문 조회]
+        B5[Webhook Endpoint<br/>PG 결제 알림]
     end
 
-    subgraph "Core Services Layer"
-        C1[주문 서비스]
-        C2[결제 서비스]
+    subgraph CoreServices[Core Services Layer]
+        C1[주문 서비스<br/>주문 생성/관리]
+        C2[결제 서비스<br/>검증/승인/취소]
     end
 
-    subgraph "Database Layer"
-        D1[(내재화 주문 DB)]
+    subgraph Database[Database Layer]
+        D1[(주문 DB<br/>status: PENDING/PAID/FAILED)]
+        D2[(결제 DB<br/>결제 정보/이력)]
     end
 
-    subgraph "Event System"
-        E1[SNS 토픽<br/>주문 이벤트]
+    subgraph EventSystem[Event System]
+        E1[SNS 주문 이벤트<br/>ORDER_COMPLETED]
+        E2[SNS 결제 이벤트<br/>PAYMENT_COMPLETED]
     end
 
-    subgraph "Message Queues"
-        F1[빅커머스 동기화<br/>SQS Queue]
-        F2[알림톡 발송<br/>SQS Queue]
-        F4[포인트 적립<br/>SQS Queue]
+    subgraph MessageQueues[Message Queues]
+        F1[빅커머스 동기화 Queue]
+        F2[알림톡 발송 Queue]
+        F4[포인트 적립 Queue]
     end
 
-    subgraph "Worker Services"
+    subgraph WorkerServices[Worker Services]
         G1[빅커머스 동기화<br/>Lambda]
         G2[알림톡 발송<br/>Lambda]
         G4[포인트 적립<br/>Lambda]
     end
 
-    subgraph "External Systems"
+    subgraph ExternalSystems[External Systems]
         H1[빅커머스 API]
-        H2[토스페이먼츠]
+        H2[토스페이먼츠 API]
         H3[알림톡 서비스]
     end
 
-    subgraph "Dead Letter Queues"
+    subgraph DLQ[Dead Letter Queues]
         I1[빅커머스 DLQ]
         I2[알림톡 DLQ]
         I4[포인트 DLQ]
     end
 
-    A1 --> B1
-
+    %% 주문 생성 플로우
+    A1 --> A2
+    A2 --> B1
     B1 --> C1
-    B2 --> C2
-    B3 --> C1
-
     C1 --> D1
+    C1 -->|주문 생성 응답| A2
+
+    %% 결제 플로우
+    A2 --> A3
+    A3 --> H2
+    H2 -->|결제 결과| A3
+    A3 -->|성공| B2
+    A3 -->|실패| B3
+
+    %% 결제 완료 처리
+    B2 --> C2
+    C2 -->|검증| H2
     C2 --> D1
+    C2 --> D2
+    C2 --> E2
 
-    C1 --> E1
-    C2 --> E1
+    %% 결제 실패 처리
+    B3 --> C1
+    C1 --> D1
 
+    %% 웹훅 처리
+    H2 -.->|웹훅| B5
+    B5 -.-> C2
+
+        %% 이벤트 처리
     E1 --> F1
     E1 --> F2
     E1 --> F4
 
+    E2 --> E1
+
+    %% 워커 처리
     F1 --> G1
     F2 --> G2
     F4 --> G4
 
     G1 --> H1
     G2 --> H3
-    C2 --> H2
-    H2 -->|웹훅| B2
 
-    G1 -.-> I1
-    G2 -.-> I2
-    G4 -.-> I4
+    %% DLQ 처리
+    G1 -.->|실패| I1
+    G2 -.->|실패| I2
+    G4 -.->|실패| I4
 
 ```
 
@@ -99,39 +133,104 @@ graph TB
 
 ```mermaid
 flowchart TD
-    A[사용자 주문 버튼 클릭] --> B[주문 생성 API 호출]
+    A[사용자 주문 버튼 클릭] --> B[주문 생성 API 호출<br/>POST /orders]
     B --> C{입력 검증}
     C -->|실패| D[400 에러 응답]
-    C -->|성공| G[주문 번호 생성]
-    G --> H[DB 트랜잭션 시작]
-    H --> I[내부 주문 레코드 생성]
-    I --> J[주문 아이템 저장]
-    J --> K[DB 트랜잭션 커밋]
-    K --> L{결제 필요?}
-    L -->|예| M[토스페이먼츠 URL 생성]
-    L -->|아니오| N[0원 주문 완료]
-    M --> O[결제 URL 응답]
-    N --> P[주문 완료 이벤트 발행]
-    O --> Q[결제 페이지로 리다이렉트]
+    C -->|성공| E[주문 번호 생성]
+    E --> F[DB 트랜잭션 시작]
+    F --> G[주문 레코드 생성<br/>status: PENDING]
+    G --> H[주문 아이템 저장]
+    H --> I[배송 정보 저장]
+    I --> J[DB 트랜잭션 커밋]
+    J --> K{결제 필요?}
+    K -->|예| L[결제 정보 준비<br/>(주문ID, 금액, 상품명)]
+    K -->|아니오| M[0원 주문 완료<br/>status: PAID]
+    L --> N[주문 생성 응답<br/>(주문ID, 결제정보)]
+    M --> O[주문 완료 이벤트 발행]
+    N --> P[프론트엔드에서<br/>PG 결제 진행]
+    O --> Q[주문 완료 응답]
 
 ```
 
-### 2. 결제 완료 처리 플로우
+### 2. 결제 플로우 (상세)
+
+```mermaid
+sequenceDiagram
+    participant User as 사용자
+    participant FE as Frontend
+    participant BE as Backend
+    participant PG as PG사
+    participant DB as Database
+
+    User->>FE: 1. 상품 선택 및 주문 요청
+    FE->>BE: 2. POST /orders (상품정보, 수량, 배송지 등)
+
+    BE->>DB: 3. 주문 데이터 생성 (status: PENDING)
+    DB-->>BE: 4. 주문 ID 반환
+
+    BE-->>FE: 5. 주문 생성 완료 응답 (주문ID, 금액, 상품명)
+
+    FE->>PG: 6. PG 컴포넌트 로드 및 결제 시작 (주문ID, 금액, 상품명)
+    Note over FE,PG: PG 결제 컴포넌트에서<br/>카드정보 입력, 본인인증 등
+
+    PG->>PG: 7. 카드사 승인 처리
+    PG-->>FE: 8. 결제 결과 (성공/실패)
+
+    alt 결제 성공
+        FE->>BE: 9a. POST /orders/{orderId}/complete (결제정보)
+        BE->>PG: 10a. 결제 검증 요청 (결제ID 등)
+        PG-->>BE: 11a. 결제 검증 응답
+
+        alt 검증 성공
+            BE->>DB: 12a. 주문 상태 업데이트 (status: PAID)
+            BE->>DB: 13a. 결제 정보 저장
+            BE-->>FE: 14a. 결제 완료 응답
+            FE-->>User: 15a. 결제 완료 페이지 이동
+        else 검증 실패 (결제 존재)
+            Note over BE: 금액/정보 불일치 등
+            BE->>PG: 12b. 결제 취소 요청 (환불)
+            BE->>DB: 13b. 주문 상태 업데이트 (status: FAILED)
+            BE-->>FE: 14b. 결제 실패 응답
+            FE-->>User: 15b. 결제 실패 안내
+        else 검증 실패 (결제 없음)
+            Note over BE: 위조된 결제 데이터
+            BE->>DB: 12c. 주문 상태 업데이트 (status: FAILED)
+            BE-->>FE: 13c. 결제 실패 응답
+            FE-->>User: 14c. 결제 실패 안내
+        end
+
+    else 결제 실패
+        FE->>BE: 9c. POST /orders/{orderId}/fail (실패정보)
+        BE->>DB: 10c. 주문 상태 업데이트 (status: FAILED)
+        BE-->>FE: 11c. 실패 처리 완료 응답
+        FE-->>User: 12c. 결제 실패 안내
+    end
+
+    Note over BE,PG: 백그라운드 웹훅 처리 (보완)
+    PG--)BE: 웹훅: 최종 결제 결과 통지
+    BE->>DB: 결제 상태 최종 검증 및 동기화
+```
+
+### 3. 결제 완료 처리 플로우 (간략)
 
 ```mermaid
 flowchart TD
     A[토스페이먼츠 콜백] --> B[결제 완료 API 호출]
-    B --> C[토스페이먼츠 결제 승인]
-    C -->|실패| D[결제 실패 처리]
-    C -->|성공| E[주문 상태 업데이트]
+    B --> C[토스페이먼츠 결제 검증]
+    C -->|검증 실패| D[결제 실패 처리]
+    C -->|검증 성공| E[주문 상태 업데이트]
     E --> F[결제 정보 저장]
     F --> G[SNS 이벤트 발행]
     G --> H[이벤트 로그 저장]
     H --> I[성공 응답]
     I --> J[주문 완료 페이지]
 
-    D --> K[에러 로그 저장]
-    K --> L[실패 응답]
+    D --> K{결제 존재 여부}
+    K -->|존재| L[결제 취소 요청]
+    K -->|미존재| M[위조 결제 처리]
+    L --> N[에러 로그 저장]
+    M --> N
+    N --> O[실패 응답]
 
 ```
 
